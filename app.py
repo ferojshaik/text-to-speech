@@ -1,15 +1,13 @@
-
 import os
 import re
-import io
-from gtts import gTTS
-from pdfminer.high_level import extract_text
+from pathlib import Path
 from flask import Flask, request, render_template, send_file
+from pdfminer.high_level import extract_text
+from gtts import gTTS
+
 app = Flask(__name__)
-# Use environment variable for data path, fallback to local for development
-DATA_DIR = os.environ.get("RENDER_DATA_DIR", ".")
-UPLOAD_FOLDER = os.path.join(DATA_DIR, "uploads")
-OUTPUT_FOLDER = os.path.join(DATA_DIR, "outputs")
+UPLOAD_FOLDER = "uploads"
+OUTPUT_FOLDER = "outputs"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
@@ -36,40 +34,37 @@ def split_into_chunks(text: str, max_chars: int = 1500):
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        pdf_file = request.files.get("pdf")
-        if not pdf_file or not pdf_file.filename:
+        pdf_file = request.files["pdf"]
+        if not pdf_file:
             return "No file uploaded", 400
 
-        # Extract text directly from the uploaded file's stream
-        text = extract_text(pdf_file.stream) or ""
+        pdf_path = Path(UPLOAD_FOLDER) / pdf_file.filename
+        pdf_file.save(pdf_path)
+
+        # Extract text
+        text = extract_text(str(pdf_path)) or ""
         text = normalize_text(text)
 
         if not text.strip():
             return "No readable text in PDF", 400
 
-        # Split & convert to in-memory MP3 objects
+        # Split & convert
         chunks = split_into_chunks(text)
-        mp3_chunks = []
+        mp3_files = []
 
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks, start=1):
             tts = gTTS(chunk, lang="en")
-            mp3_fp = io.BytesIO()
-            tts.write_to_fp(mp3_fp)
-            mp3_fp.seek(0)
-            mp3_chunks.append(mp3_fp)
+            out_file = Path(OUTPUT_FOLDER) / f"out_part_{i}.mp3"
+            tts.save(str(out_file))
+            mp3_files.append(out_file)
 
-        # Concatenate MP3 chunks in memory
-        final_mp3 = io.BytesIO()
-        for mp3_fp in mp3_chunks:
-            final_mp3.write(mp3_fp.read())
-        final_mp3.seek(0)
+        # Concatenate MP3s into one file
+        final_file = Path(OUTPUT_FOLDER) / "final.mp3"
+        with open(final_file, "wb") as f_out:
+            for part in mp3_files:
+                f_out.write(open(part, "rb").read())
 
-        return send_file(
-            final_mp3,
-            as_attachment=True,
-            download_name="output.mp3",
-            mimetype="audio/mpeg"
-        )
+        return send_file(final_file, as_attachment=True)
 
     return render_template("index.html")
 
