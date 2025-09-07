@@ -1,6 +1,7 @@
+
 import os
 import re
-from pathlib import Path
+import io
 from gtts import gTTS
 from pdfminer.high_level import extract_text
 from flask import Flask, request, render_template, send_file
@@ -35,37 +36,40 @@ def split_into_chunks(text: str, max_chars: int = 1500):
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        pdf_file = request.files["pdf"]
-        if not pdf_file:
+        pdf_file = request.files.get("pdf")
+        if not pdf_file or not pdf_file.filename:
             return "No file uploaded", 400
 
-        pdf_path = Path(UPLOAD_FOLDER) / pdf_file.filename
-        pdf_file.save(pdf_path)
-
-        # Extract text
-        text = extract_text(str(pdf_path)) or ""
+        # Extract text directly from the uploaded file's stream
+        text = extract_text(pdf_file.stream) or ""
         text = normalize_text(text)
 
         if not text.strip():
             return "No readable text in PDF", 400
 
-        # Split & convert
+        # Split & convert to in-memory MP3 objects
         chunks = split_into_chunks(text)
-        mp3_files = []
+        mp3_chunks = []
 
-        for i, chunk in enumerate(chunks, start=1):
+        for chunk in chunks:
             tts = gTTS(chunk, lang="en")
-            out_file = Path(OUTPUT_FOLDER) / f"out_part_{i}.mp3"
-            tts.save(str(out_file))
-            mp3_files.append(out_file)
+            mp3_fp = io.BytesIO()
+            tts.write_to_fp(mp3_fp)
+            mp3_fp.seek(0)
+            mp3_chunks.append(mp3_fp)
 
-        # Concatenate MP3s into one file
-        final_file = Path(OUTPUT_FOLDER) / "final.mp3"
-        with open(final_file, "wb") as f_out:
-            for part in mp3_files:
-                f_out.write(open(part, "rb").read())
+        # Concatenate MP3 chunks in memory
+        final_mp3 = io.BytesIO()
+        for mp3_fp in mp3_chunks:
+            final_mp3.write(mp3_fp.read())
+        final_mp3.seek(0)
 
-        return send_file(final_file, as_attachment=True)
+        return send_file(
+            final_mp3,
+            as_attachment=True,
+            download_name="output.mp3",
+            mimetype="audio/mpeg"
+        )
 
     return render_template("index.html")
 
