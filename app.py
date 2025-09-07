@@ -1,13 +1,14 @@
 import os
 import re
 from pathlib import Path
-from flask import Flask, request, render_template, send_file
-from pdfminer.high_level import extract_text
 from gtts import gTTS
-
+from pdfminer.high_level import extract_text
+from flask import Flask, request, render_template, send_file
 app = Flask(__name__)
-UPLOAD_FOLDER = "uploads"
-OUTPUT_FOLDER = "outputs"
+# Use environment variable for data path, fallback to local for development
+DATA_DIR = os.environ.get("RENDER_DATA_DIR", ".")
+UPLOAD_FOLDER = os.path.join(DATA_DIR, "uploads")
+OUTPUT_FOLDER = os.path.join(DATA_DIR, "outputs")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
